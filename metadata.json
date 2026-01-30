@@ -1,0 +1,7 @@
+{
+  "name": "Lumina Grocer 2.0",
+  "description": "A stylish, smart shopping list application featuring light/dark modes, category management, and AI-powered product categorization.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
