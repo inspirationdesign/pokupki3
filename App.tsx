@@ -418,41 +418,8 @@ const App: React.FC = () => {
     };
   }, [tgUser]);
 
-  // Polling fallback for real-time sync (every 10 seconds)
-  useEffect(() => {
-    if (!tgUser || tgUser.id === 0) return;
-
-    const pollItems = async () => {
-      try {
-        const res = await fetch(`/api/items?user_id=${tgUser.id}`);
-        if (res.ok) {
-          const data = await res.json();
-          setItems(prev => {
-            // Merge server items with local items
-            const serverIds = new Set(data.map((item: any) => item.id));
-            const updatedItems = data.map((item: any) => ({
-              id: item.id,
-              name: item.text,
-              categoryId: item.category || 'dept_none',
-              completed: item.is_bought,
-              onList: true,
-              purchaseCount: prev.find(p => p.id === item.id)?.purchaseCount || 0
-            }));
-            // Keep local-only items that haven't synced yet
-            const localOnlyItems = prev.filter(p => !serverIds.has(p.id) && !p.onList);
-            return [...updatedItems, ...localOnlyItems];
-          });
-        }
-      } catch (e) {
-        console.error('Polling error:', e);
-      }
-    };
-
-    // Poll every 10 seconds
-    const interval = setInterval(pollItems, 10000);
-
-    return () => clearInterval(interval);
-  }, [tgUser]);
+  // NOTE: Real-time sync is handled via WebSocket above
+  // Items are synced from server on initial load in authAndSync
 
   useEffect(() => {
     localStorage.setItem('lumina_categories', JSON.stringify(categories));
