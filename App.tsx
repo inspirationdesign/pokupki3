@@ -1753,40 +1753,43 @@ const App: React.FC = () => {
               ))}
             </div>
 
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setIsParsedModalOpen(false)} className="flex-1 font-black uppercase text-[10px] tracking-widest text-slate-400">Отмена</button>
-              <button
-                onClick={() => {
-                  const toAdd = parsedItems.filter(i => i.selected);
-                  let updatedCats = [...categories];
-                  const reorderCats = (cats: CategoryDef[]) => {
-                    const others = cats.filter(c => c.id !== 'dept_none');
-                    const none = cats.find(c => c.id === 'dept_none') || { id: 'dept_none', name: 'Без категории', emoji: '⚪' };
-                    return [...others, none];
-                  };
+            {/* Only show buttons after loading is complete */}
+            {!isAiLoading && parsedItems.length > 0 && (
+              <div className="flex gap-3 mt-6">
+                <button onClick={() => setIsParsedModalOpen(false)} className="flex-1 font-black uppercase text-[10px] tracking-widest text-slate-400">Отмена</button>
+                <button
+                  onClick={() => {
+                    const toAdd = parsedItems.filter(i => i.selected);
+                    let updatedCats = [...categories];
+                    const reorderCats = (cats: CategoryDef[]) => {
+                      const others = cats.filter(c => c.id !== 'dept_none');
+                      const none = cats.find(c => c.id === 'dept_none') || { id: 'dept_none', name: 'Без категории', emoji: '⚪' };
+                      return [...others, none];
+                    };
 
-                  toAdd.forEach(pItem => {
-                    const historyItem = items.find(i => i.name.toLowerCase() === pItem.name.toLowerCase());
-                    if (historyItem) {
-                      finalizeAddItem(pItem.name, historyItem.categoryId);
-                    } else {
-                      let cat = updatedCats.find(c => c.name.toLowerCase() === pItem.categoryName.toLowerCase());
-                      if (!cat) {
-                        cat = { id: 'dept_' + Date.now() + Math.random(), name: pItem.categoryName, emoji: pItem.suggestedEmoji || '📦' };
-                        updatedCats.push(cat);
+                    toAdd.forEach(pItem => {
+                      const historyItem = items.find(i => i.name.toLowerCase() === pItem.name.toLowerCase());
+                      if (historyItem) {
+                        finalizeAddItem(pItem.name, historyItem.categoryId);
+                      } else {
+                        let cat = updatedCats.find(c => c.name.toLowerCase() === pItem.categoryName.toLowerCase());
+                        if (!cat) {
+                          cat = { id: 'dept_' + Date.now() + Math.random(), name: pItem.categoryName, emoji: pItem.suggestedEmoji || '📦' };
+                          updatedCats.push(cat);
+                        }
+                        finalizeAddItem(pItem.name, cat.id);
                       }
-                      finalizeAddItem(pItem.name, cat.id);
-                    }
-                  });
-                  setCategories(reorderCats(updatedCats));
-                  setIsParsedModalOpen(false);
-                  showToast(`Добавлено ${toAdd.length} товаров`);
-                }}
-                className="flex-[2] h-14 bg-primary text-white font-black uppercase text-[10px] tracking-widest rounded-2xl shadow-lg hover:opacity-90 transition-opacity"
-              >
-                Добавить всё
-              </button>
-            </div>
+                    });
+                    setCategories(reorderCats(updatedCats));
+                    setIsParsedModalOpen(false);
+                    showToast(`Добавлено ${toAdd.length} товаров`);
+                  }}
+                  className="flex-[2] h-14 bg-primary text-white font-black uppercase text-[10px] tracking-widest rounded-2xl shadow-lg hover:opacity-90 transition-opacity"
+                >
+                  Добавить всё
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
