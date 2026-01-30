@@ -1,8 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CategoryDef, SmartCategoryResponse, PurchaseLog } from "../types";
 
-// Models to try in order (fallback if one fails with 400)
-const MODELS = ['gemini-3-flash-preview', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+// Models to try in order (fallback if one fails)
+const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 let currentModelIndex = 0;
 const getModelName = () => MODELS[currentModelIndex] || MODELS[0];
 
@@ -29,15 +29,19 @@ async function callWithRetry<T>(fn: () => Promise<T>, retries = 5, delay = 2000)
   } catch (error: any) {
     console.error("[Lumina Service] AI Error Details:", error);
 
-    // Check if it's a 400 error (bad request - often means model not available)
-    const is400Error =
+    // Check if it's a model error (400/404 - model not available)
+    const isModelError =
       error?.status === 400 ||
+      error?.status === 404 ||
       error?.code === 400 ||
+      error?.code === 404 ||
       error?.message?.includes('400') ||
-      (error?.error && error.error.code === 400);
+      error?.message?.includes('404') ||
+      error?.message?.includes('not found') ||
+      (error?.error && (error.error.code === 400 || error.error.code === 404));
 
-    // If 400 error and we have more models to try, switch to next model
-    if (is400Error && currentModelIndex < MODELS.length - 1) {
+    // If model error and we have more models to try, switch to next model
+    if (isModelError && currentModelIndex < MODELS.length - 1) {
       currentModelIndex++;
       console.log(`[Lumina Service] Model error, switching to: ${getModelName()}`);
       return callWithRetry(fn, retries, delay);
