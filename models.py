@@ -11,6 +11,7 @@ class Family(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     invite_code = Column(String, unique=True, index=True, default=generate_invite_code)
+    owner_id = Column(BigInteger, nullable=True)  # telegram_id of family creator
 
     users = relationship("User", back_populates="family")
     items = relationship("Item", back_populates="family")

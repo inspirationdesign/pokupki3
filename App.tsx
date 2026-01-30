@@ -147,6 +147,7 @@ const App: React.FC = () => {
   const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
 
   // ADMIN STATE
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
@@ -303,11 +304,13 @@ const App: React.FC = () => {
             const joinData = await joinRes.json();
             setFamilyMembers(joinData.family.members.filter((m: any) => m.telegram_id !== tgUser.id));
             setInviteCode(joinData.family.invite_code);
+            setIsOwner(joinData.family.is_owner || false);
             showToast("Вы присоединились к семье!");
           }
         } else {
           setFamilyMembers(authData.family.members.filter((m: any) => m.telegram_id !== tgUser.id));
           setInviteCode(authData.family.invite_code);
+          setIsOwner(authData.family.is_owner || false);
         }
 
         // Sync Items
@@ -821,13 +824,57 @@ const App: React.FC = () => {
       const botUsername = "pokupkigross_bot";
       // FIX: Use /start?startapp= format so it works everywhere
       const link = `https://t.me/${botUsername}/start?startapp=invite_${inviteCode}`;
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.openTelegramLink(link);
+      if ((window as any).Telegram?.WebApp) {
+        (window as any).Telegram.WebApp.openTelegramLink(link);
       } else {
         window.open(link, '_blank');
       }
     } else {
       showToast("Код приглашения еще не загружен");
+    }
+  };
+
+  const leaveFamily = async () => {
+    if (!tgUser) return;
+    try {
+      const res = await fetch('/api/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: tgUser.id })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFamilyMembers([]);
+        setInviteCode(data.family.invite_code);
+        setIsOwner(true);
+        showToast("Вы покинули семью");
+      } else {
+        showToast("Ошибка при выходе из семьи", true);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Ошибка сети", true);
+    }
+  };
+
+  const removeFamilyMember = async (targetUserId: number) => {
+    if (!tgUser || !isOwner) return;
+    try {
+      const res = await fetch('/api/remove-member', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_id: tgUser.id, target_user_id: targetUserId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFamilyMembers(data.family.members.filter((m: any) => m.telegram_id !== tgUser.id));
+        showToast("Пользователь удален из семьи");
+      } else {
+        showToast("Ошибка при удалении", true);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Ошибка сети", true);
     }
   };
 
@@ -1042,33 +1089,36 @@ const App: React.FC = () => {
   );
 
   const UserProfileHeader = () => (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-1">
+      {/* Current user avatar first */}
+      <div className="relative z-20">
+        {tgUser?.photo_url ? (
+          <img src={tgUser.photo_url} alt="Ava" className="w-10 h-10 rounded-full object-cover bg-slate-200 border-2 border-white dark:border-slate-900" />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-sm border-2 border-white dark:border-slate-900">
+            {tgUser?.first_name?.charAt(0) || 'G'}
+          </div>
+        )}
+      </div>
+      {/* Family members */}
       {familyMembers.length > 0 && (
-        <div className="flex -space-x-3 mr-2">
-          {familyMembers.slice(0, 5).map((m, i) => (
-            <div key={m.telegram_id} className="w-9 h-9 rounded-full border-2 border-slate-50 dark:border-[#020617] relative z-10">
+        <div className="flex -ml-3">
+          {familyMembers.slice(0, 4).map((m, i) => (
+            <div key={m.telegram_id} className="w-10 h-10 rounded-full border-2 border-white dark:border-slate-900 -ml-2 first:ml-0" style={{ zIndex: 10 - i }}>
               {m.photo_url ? (
                 <img src={m.photo_url} className="w-full h-full rounded-full object-cover" alt="Member" />
               ) : (
-                <div className="w-full h-full rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px] font-bold">
-                  {m.username?.charAt(0) || 'U'}
+                <div className="w-full h-full rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-bold">
+                  {m.username?.charAt(0)?.toUpperCase() || 'U'}
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
-      <div className="relative z-20">
-        {tgUser?.photo_url ? (
-          <img src={tgUser.photo_url} alt="Ava" className="w-9 h-9 rounded-full object-cover bg-slate-200" />
-        ) : (
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-sm">
-            {tgUser?.first_name?.charAt(0) || 'G'}
-          </div>
-        )}
-      </div>
-      <button onClick={inviteUser} className="w-9 h-9 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-300 hover:text-primary hover:border-primary transition-all">
-        <Icons.Plus size={16} />
+      {/* Invite button */}
+      <button onClick={inviteUser} className="w-10 h-10 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400 hover:text-primary hover:border-primary transition-all -ml-2">
+        <Icons.Plus size={18} />
       </button>
     </div>
   );
@@ -1726,6 +1776,80 @@ const App: React.FC = () => {
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${darkMode ? 'left-7' : 'left-1'}`} />
                   </button>
                 </div>
+              </div>
+
+              {/* Family Management Section */}
+              <div>
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Семья</p>
+                  <button onClick={inviteUser} className="text-primary text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-primary/10 rounded-full">+ Пригласить</button>
+                </div>
+                <div className="space-y-2">
+                  {/* Current user */}
+                  <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
+                        {tgUser?.photo_url ? (
+                          <img src={tgUser.photo_url} className="w-full h-full object-cover" alt="You" />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-primary to-violet-600 flex items-center justify-center text-white font-bold text-sm">
+                            {tgUser?.first_name?.charAt(0) || 'G'}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold">{tgUser?.first_name || 'Вы'}</p>
+                        <p className="text-[10px] opacity-40">{isOwner ? 'Владелец' : 'Участник'}</p>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-black uppercase tracking-widest text-primary bg-primary/10 px-2 py-1 rounded-lg">Вы</span>
+                  </div>
+
+                  {/* Family members */}
+                  {familyMembers.map(member => (
+                    <div key={member.telegram_id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
+                          {member.photo_url ? (
+                            <img src={member.photo_url} className="w-full h-full object-cover" alt="Member" />
+                          ) : (
+                            <div className="w-full h-full bg-indigo-500 flex items-center justify-center text-white font-bold text-sm">
+                              {member.username?.charAt(0)?.toUpperCase() || 'U'}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">{member.username || 'Пользователь'}</p>
+                          <p className="text-[10px] opacity-40">Участник</p>
+                        </div>
+                      </div>
+                      {isOwner && (
+                        <button
+                          onClick={() => removeFamilyMember(member.telegram_id)}
+                          className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                        >
+                          <Icons.X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {familyMembers.length === 0 && (
+                    <div className="text-center py-4 text-slate-400 text-xs">
+                      Пока вы один в семье. Пригласите близких!
+                    </div>
+                  )}
+                </div>
+
+                {/* Leave family button - only show if there are other members */}
+                {familyMembers.length > 0 && (
+                  <button
+                    onClick={leaveFamily}
+                    className="w-full mt-3 py-3 text-red-500 text-[10px] font-black uppercase tracking-widest rounded-2xl border-2 border-red-200 dark:border-red-900/30 hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
+                  >
+                    Покинуть семью
+                  </button>
+                )}
               </div>
 
               <div>

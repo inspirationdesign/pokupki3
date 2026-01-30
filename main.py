@@ -57,19 +57,16 @@ async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # 2. Separate migration step for last_seen column
+    # 2. Separate migration steps for new columns
     try:
-        # usage of isolation_level="AUTOCOMMIT" is often needed for DDL like ALTER TABLE in some drivers, 
-        # but with asyncpg it's usually handled by not being in a transaction block. 
-        # However, engine.begin() creates a transaction.
-        # We will use a separate connection.
         async with engine.connect() as conn:
-            # We must commit explicitely or use autocommit logic if not in begin()
-            # But simpler: just try to execute. 
+            # Add last_seen column if not exists
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITHOUT TIME ZONE;"))
+            # Add owner_id column if not exists
+            await conn.execute(text("ALTER TABLE families ADD COLUMN IF NOT EXISTS owner_id BIGINT;"))
             await conn.commit()
     except Exception as e:
-        # Ignore error if column exists or other non-critical migration issue
+        # Ignore error if columns exist or other non-critical migration issue
         print(f"Migration warning (non-critical): {e}")
 
 @app.post("/api/auth")
@@ -80,8 +77,8 @@ async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
     current_time = datetime.utcnow()
 
     if not user:
-        # Create new family for new user
-        new_family = Family()
+        # Create new family for new user (user becomes owner)
+        new_family = Family(owner_id=user_data.id)
         db.add(new_family)
         await db.commit()
         await db.refresh(new_family)
@@ -114,6 +111,9 @@ async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
     )
     user = result.scalar_one()
     
+    # Determine if current user is the family owner
+    is_owner = user.family.owner_id == user.telegram_id
+    
     # Serialize the response properly
     return {
         "status": "ok", 
@@ -126,6 +126,8 @@ async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
         "family": {
             "id": user.family.id,
             "invite_code": user.family.invite_code,
+            "owner_id": user.family.owner_id,
+            "is_owner": is_owner,
             "members": [
                 {
                     "telegram_id": m.telegram_id,
@@ -200,6 +202,121 @@ async def join_family(join_req: JoinRequest, db: AsyncSession = Depends(get_db))
          "family": {
             "id": family.id,
             "invite_code": family.invite_code,
+            "owner_id": family.owner_id,
+            "is_owner": family.owner_id == join_req.user_id,
+            "members": [
+                {
+                    "telegram_id": m.telegram_id,
+                    "username": m.username,
+                    "photo_url": m.photo_url
+                }
+                for m in members
+            ]
+        }
+    }
+
+class LeaveRequest(BaseModel):
+    user_id: int
+
+@app.post("/api/leave")
+async def leave_family(leave_req: LeaveRequest, db: AsyncSession = Depends(get_db)):
+    """User leaves their current family and gets a new one."""
+    # Find user
+    result = await db.execute(select(User).where(User.telegram_id == leave_req.user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    old_family_id = user.family_id
+    
+    # Create new family for the user (user becomes owner)
+    new_family = Family(owner_id=leave_req.user_id)
+    db.add(new_family)
+    await db.commit()
+    await db.refresh(new_family)
+    
+    # Move user to new family
+    user.family_id = new_family.id
+    await db.commit()
+    
+    # If old family is now empty, we could delete it (optional cleanup)
+    # For now we leave it as is
+    
+    return {
+        "status": "success",
+        "family": {
+            "id": new_family.id,
+            "invite_code": new_family.invite_code,
+            "owner_id": new_family.owner_id,
+            "is_owner": True,
+            "members": [
+                {
+                    "telegram_id": user.telegram_id,
+                    "username": user.username,
+                    "photo_url": user.photo_url
+                }
+            ]
+        }
+    }
+
+class RemoveMemberRequest(BaseModel):
+    owner_id: int
+    target_user_id: int
+
+@app.post("/api/remove-member")
+async def remove_member(remove_req: RemoveMemberRequest, db: AsyncSession = Depends(get_db)):
+    """Owner removes a member from the family."""
+    # Find owner
+    owner_result = await db.execute(
+        select(User)
+        .where(User.telegram_id == remove_req.owner_id)
+        .options(selectinload(User.family))
+    )
+    owner = owner_result.scalar_one_or_none()
+    
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    # Check if requester is actually the owner
+    if owner.family.owner_id != remove_req.owner_id:
+        raise HTTPException(status_code=403, detail="Only the family owner can remove members")
+    
+    # Can't remove yourself
+    if remove_req.owner_id == remove_req.target_user_id:
+        raise HTTPException(status_code=400, detail="Cannot remove yourself. Use /api/leave instead.")
+    
+    # Find target user
+    target_result = await db.execute(select(User).where(User.telegram_id == remove_req.target_user_id))
+    target_user = target_result.scalar_one_or_none()
+    
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+    
+    if target_user.family_id != owner.family_id:
+        raise HTTPException(status_code=400, detail="User is not in your family")
+    
+    # Create new family for removed user
+    new_family = Family(owner_id=remove_req.target_user_id)
+    db.add(new_family)
+    await db.commit()
+    await db.refresh(new_family)
+    
+    # Move target user to new family
+    target_user.family_id = new_family.id
+    await db.commit()
+    
+    # Get updated members of owner's family
+    members_result = await db.execute(select(User).where(User.family_id == owner.family_id))
+    members = members_result.scalars().all()
+    
+    return {
+        "status": "success",
+        "family": {
+            "id": owner.family.id,
+            "invite_code": owner.family.invite_code,
+            "owner_id": owner.family.owner_id,
+            "is_owner": True,
             "members": [
                 {
                     "telegram_id": m.telegram_id,
