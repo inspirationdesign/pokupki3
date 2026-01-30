@@ -423,22 +423,30 @@ const App: React.FC = () => {
         const res = await fetch(`/api/items?user_id=${tgUser.id}`);
         if (res.ok && syncLockRef.current === 0) {
           const remoteItems = await res.json();
-          const mappedItems: ProductItem[] = remoteItems.map((ri: any) => ({
-            id: ri.id,
-            name: ri.text,
-            categoryId: ri.category || 'dept_none',
-            completed: ri.is_bought,
-            onList: true,
-            purchaseCount: ri.purchase_count || 0
-          }));
-          setItems(mappedItems);
+          // Merge with previous items to preserve completedAt
+          setItems(prev => {
+            const prevMap = new Map(prev.map(p => [p.id, p]));
+            return remoteItems.map((ri: any) => {
+              const existing = prevMap.get(ri.id);
+              return {
+                id: ri.id,
+                name: ri.text,
+                categoryId: ri.category || 'dept_none',
+                completed: ri.is_bought,
+                onList: true,
+                purchaseCount: ri.purchase_count || 0,
+                // Preserve completedAt from local state
+                completedAt: existing?.completedAt
+              };
+            });
+          });
         }
       } catch (e) {
         // Silent fail for polling
       }
     };
 
-    const interval = setInterval(pollItems, 3000);
+    const interval = setInterval(pollItems, 1000);
     return () => clearInterval(interval);
   }, [tgUser]);
   useEffect(() => {
