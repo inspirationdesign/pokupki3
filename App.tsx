@@ -775,8 +775,18 @@ const App: React.FC = () => {
 
   const toggleHistoryItem = (item: ProductItem) => {
     if (item.onList && !item.completed) {
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, onList: false } : i));
+      // Remove from buy list - delete from server DB
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, onList: false, completed: false } : i));
+
+      // Delete from server to remove from family's buy list
+      if (tgUser) {
+        syncLockRef.current++;
+        fetch(`/api/items/${item.id}?user_id=${tgUser.id}`, {
+          method: 'DELETE'
+        }).finally(() => { syncLockRef.current--; });
+      }
     } else {
+      // Add to buy list
       finalizeAddItem(item.name, item.categoryId);
     }
   };
@@ -1021,10 +1031,18 @@ const App: React.FC = () => {
         unique.set(item.name.toLowerCase(), item);
       }
     });
-    return Array.from(unique.values()).sort((a, b) => b.purchaseCount - a.purchaseCount);
+    // Sort by purchaseCount desc, then by name for stability
+    return Array.from(unique.values()).sort((a, b) => {
+      if (b.purchaseCount !== a.purchaseCount) return b.purchaseCount - a.purchaseCount;
+      return a.name.localeCompare(b.name);
+    });
   }, [items]);
 
-  const historyListFull = useMemo(() => [...items].sort((a, b) => b.purchaseCount - a.purchaseCount), [items]);
+  // Sort by purchaseCount desc, then by name for stability
+  const historyListFull = useMemo(() => [...items].sort((a, b) => {
+    if (b.purchaseCount !== a.purchaseCount) return b.purchaseCount - a.purchaseCount;
+    return a.name.localeCompare(b.name);
+  }), [items]);
 
   const sortedGroupedHistoryList = useMemo(() => {
     const groups: Record<string, { cat: CategoryDef, items: ProductItem[], totalCount: number }> = {};
