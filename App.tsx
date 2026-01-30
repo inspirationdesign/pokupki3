@@ -892,14 +892,17 @@ const App: React.FC = () => {
   const inviteUser = () => {
     if (inviteCode) {
       const botUsername = "pokupkigross_bot";
-      const link = `https://t.me/${botUsername}/start?startapp=invite_${inviteCode}`;
-      const tg = (window as any).Telegram?.WebApp;
+      const appLink = `https://t.me/${botUsername}/start?startapp=invite_${inviteCode}`;
+      const shareText = "Присоединяйся к моей семье в списке покупок! 🛒";
 
-      if (tg) {
-        // Use native share URL which opens Telegram's share dialog
-        tg.shareUrl?.(link) || tg.openTelegramLink?.(link) || window.open(link, '_blank');
+      // Use t.me/share/url format to open Telegram's native share dialog with contact list
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(appLink)}&text=${encodeURIComponent(shareText)}`;
+
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg?.openTelegramLink) {
+        tg.openTelegramLink(shareUrl);
       } else {
-        window.open(link, '_blank');
+        window.open(shareUrl, '_blank');
       }
     } else {
       showToast("Код приглашения еще не загружен");
