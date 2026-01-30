@@ -28,10 +28,11 @@ if DATABASE_URL:
     except Exception as e:
         print(f"DEBUG: Could not parse URL for debugging: {e}")
 
-# Fix for Supabase/PgBouncer: Disable prepared statements
+# Fix for Supabase/PgBouncer: Disable prepared statements and enable pre-ping
 engine = create_async_engine(
     DATABASE_URL, 
     echo=True,
+    pool_pre_ping=True,
     connect_args={
         "statement_cache_size": 0
     }

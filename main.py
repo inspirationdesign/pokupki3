@@ -53,14 +53,24 @@ class ItemUpdate(BaseModel):
 
 @app.on_event("startup")
 async def startup():
+    # 1. Create tables if they don't exist
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Auto-migration for existing users table to add last_seen column
-        try:
-             # Check if last_seen column exists (PostgreSQL specific check)
-             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITHOUT TIME ZONE;"))
-        except Exception as e:
-            print(f"Migration warning: {e}")
+
+    # 2. Separate migration step for last_seen column
+    try:
+        # usage of isolation_level="AUTOCOMMIT" is often needed for DDL like ALTER TABLE in some drivers, 
+        # but with asyncpg it's usually handled by not being in a transaction block. 
+        # However, engine.begin() creates a transaction.
+        # We will use a separate connection.
+        async with engine.connect() as conn:
+            # We must commit explicitely or use autocommit logic if not in begin()
+            # But simpler: just try to execute. 
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITHOUT TIME ZONE;"))
+            await conn.commit()
+    except Exception as e:
+        # Ignore error if column exists or other non-critical migration issue
+        print(f"Migration warning (non-critical): {e}")
 
 @app.post("/api/auth")
 async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
