@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import List, Optional
@@ -54,6 +55,12 @@ class ItemUpdate(BaseModel):
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Auto-migration for existing users table to add last_seen column
+        try:
+             # Check if last_seen column exists (PostgreSQL specific check)
+             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITHOUT TIME ZONE;"))
+        except Exception as e:
+            print(f"Migration warning: {e}")
 
 @app.post("/api/auth")
 async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
