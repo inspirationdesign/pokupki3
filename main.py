@@ -465,22 +465,28 @@ async def delete_item(item_id: str, user_id: int, db: AsyncSession = Depends(get
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: int):
     # Get user's family_id from database
-    async for db in get_db():
+    from database import AsyncSessionLocal
+    
+    async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.telegram_id == user_id))
         user = result.scalar_one_or_none()
         if not user:
             await websocket.close(code=4001)
             return
         family_id = user.family_id
-        break
     
     await manager.connect(websocket, user_id, family_id)
     try:
         while True:
-            # Keep connection alive, receive messages (could be ping/pong)
+            # Keep connection alive, receive messages (ping/pong)
             data = await websocket.receive_text()
-            # Could handle client messages here if needed
+            # Echo back for ping/pong
+            if data == "ping":
+                await websocket.send_text("pong")
     except WebSocketDisconnect:
+        manager.disconnect(user_id, family_id)
+    except Exception as e:
+        print(f"WebSocket error for user {user_id}: {e}")
         manager.disconnect(user_id, family_id)
 
 # Serve SPA
