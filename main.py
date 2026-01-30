@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,11 +7,46 @@ from sqlalchemy.future import select
 from sqlalchemy import text
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 import os
+import json
 
 from database import get_db, engine, Base
 from models import User, Family, Item
+
+# WebSocket Connection Manager for real-time sync
+class ConnectionManager:
+    def __init__(self):
+        # Map family_id -> list of (user_id, websocket)
+        self.active_connections: Dict[int, List[tuple]] = {}
+    
+    async def connect(self, websocket: WebSocket, user_id: int, family_id: int):
+        await websocket.accept()
+        if family_id not in self.active_connections:
+            self.active_connections[family_id] = []
+        self.active_connections[family_id].append((user_id, websocket))
+    
+    def disconnect(self, user_id: int, family_id: int):
+        if family_id in self.active_connections:
+            self.active_connections[family_id] = [
+                (uid, ws) for uid, ws in self.active_connections[family_id] 
+                if uid != user_id
+            ]
+            if not self.active_connections[family_id]:
+                del self.active_connections[family_id]
+    
+    async def broadcast_to_family(self, family_id: int, message: dict, exclude_user_id: int = None):
+        """Broadcast message to all family members except the sender"""
+        if family_id not in self.active_connections:
+            return
+        for uid, ws in self.active_connections[family_id]:
+            if uid != exclude_user_id:
+                try:
+                    await ws.send_json(message)
+                except:
+                    pass  # Connection might be closed
+
+manager = ConnectionManager()
 
 app = FastAPI()
 
@@ -369,7 +404,7 @@ async def create_or_update_item(item_data: ItemCreate, db: AsyncSession = Depend
         existing_item.text = item_data.text
         existing_item.is_bought = item_data.is_bought
         existing_item.category = item_data.category
-        # Ensure family ID is consistent if needed, but usually item stays in family
+        action = "item_updated"
     else:
         # Create
         new_item = Item(
@@ -380,8 +415,21 @@ async def create_or_update_item(item_data: ItemCreate, db: AsyncSession = Depend
             family_id=user.family_id
         )
         db.add(new_item)
+        action = "item_added"
     
     await db.commit()
+    
+    # Broadcast to family members
+    await manager.broadcast_to_family(user.family_id, {
+        "type": action,
+        "item": {
+            "id": item_data.id,
+            "text": item_data.text,
+            "is_bought": item_data.is_bought,
+            "category": item_data.category
+        }
+    }, exclude_user_id=item_data.user_id)
+    
     return {"status": "ok"}
 
 @app.delete("/api/items/{item_id}")
@@ -399,11 +447,41 @@ async def delete_item(item_id: str, user_id: int, db: AsyncSession = Depends(get
     user = user_result.scalar_one_or_none()
 
     if user and user.family_id == item.family_id:
+        family_id = item.family_id
         await db.delete(item)
         await db.commit()
+        
+        # Broadcast deletion to family
+        await manager.broadcast_to_family(family_id, {
+            "type": "item_deleted",
+            "item_id": item_id
+        }, exclude_user_id=user_id)
+        
         return {"status": "deleted"}
     
     raise HTTPException(status_code=403, detail="Not authorized")
+
+# WebSocket endpoint for real-time sync
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    # Get user's family_id from database
+    async for db in get_db():
+        result = await db.execute(select(User).where(User.telegram_id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            await websocket.close(code=4001)
+            return
+        family_id = user.family_id
+        break
+    
+    await manager.connect(websocket, user_id, family_id)
+    try:
+        while True:
+            # Keep connection alive, receive messages (could be ping/pong)
+            data = await websocket.receive_text()
+            # Could handle client messages here if needed
+    except WebSocketDisconnect:
+        manager.disconnect(user_id, family_id)
 
 # Serve SPA
 app.mount("/", StaticFiles(directory="dist", html=True), name="static")

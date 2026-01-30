@@ -348,6 +348,76 @@ const App: React.FC = () => {
     authAndSync();
   }, [tgUser]);
 
+  // WebSocket for real-time sync
+  useEffect(() => {
+    if (!tgUser || tgUser.id === 0) return;
+
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/${tgUser.id}`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'item_added' || data.type === 'item_updated') {
+            setItems(prev => {
+              const exists = prev.find(i => i.id === data.item.id);
+              if (exists) {
+                return prev.map(i => i.id === data.item.id ? {
+                  ...i,
+                  name: data.item.text,
+                  categoryId: data.item.category || 'dept_none',
+                  completed: data.item.is_bought,
+                  onList: true
+                } : i);
+              } else {
+                return [...prev, {
+                  id: data.item.id,
+                  name: data.item.text,
+                  categoryId: data.item.category || 'dept_none',
+                  completed: data.item.is_bought,
+                  onList: true,
+                  purchaseCount: 0
+                }];
+              }
+            });
+          } else if (data.type === 'item_deleted') {
+            setItems(prev => prev.filter(i => i.id !== data.item_id));
+          }
+        } catch (e) {
+          console.error('WebSocket message error:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected, reconnecting in 3s...');
+        reconnectTimeout = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        ws?.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      ws?.close();
+    };
+  }, [tgUser]);
+
   useEffect(() => {
     localStorage.setItem('lumina_categories', JSON.stringify(categories));
     localStorage.setItem('lumina_items', JSON.stringify(items));
@@ -1916,30 +1986,34 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* ADMIN MODAL */}
       {isAdminModalOpen && (
         <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
           <div className="bg-white dark:bg-slate-900 w-full max-sm rounded-[32px] pt-5 px-6 pb-6 shadow-2xl flex flex-col h-[85vh] animate-bounce-short">
-            <ModalHeader title="Admin Panel" onClose={() => setIsAdminModalOpen(false)} />
+            <ModalHeader title="Панель администратора" onClose={() => setIsAdminModalOpen(false)} />
             <div className="flex-1 overflow-y-auto pr-1 scrollbar-hide space-y-2">
               <div className="flex justify-between px-2 mb-2">
-                <span className="text-[10px] font-black uppercase text-slate-400">User</span>
-                <span className="text-[10px] font-black uppercase text-slate-400">Status</span>
+                <span className="text-[10px] font-black uppercase text-slate-400">Пользователь</span>
+                <span className="text-[10px] font-black uppercase text-slate-400">Статус</span>
               </div>
               {adminStats.map((user) => (
                 <div key={user.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                      {/* Placeholder avatar or user photo if valid/available via proxy */}
-                      <div className="w-full h-full flex items-center justify-center text-xs font-bold">{user.username?.[0]?.toUpperCase() || '?'}</div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden flex-shrink-0">
+                      {user.photo_url ? (
+                        <img src={user.photo_url} className="w-full h-full object-cover" alt="Аватар" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-sm font-bold text-slate-500">
+                          {user.username?.[0]?.toUpperCase() || '?'}
+                        </div>
+                      )}
                     </div>
                     <div>
-                      <p className="text-xs font-bold">{user.username || user.first_name || 'Unknown'}</p>
-                      <p className="text-[9px] opacity-40">Family: {user.family_id}</p>
+                      <p className="text-sm font-bold">{user.username || user.first_name || 'Неизвестный'}</p>
+                      <p className="text-[10px] opacity-40">Семья: {user.family_id}</p>
                     </div>
                   </div>
-                  <div className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${user.is_online ? 'bg-green-500/10 text-green-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'}`}>
-                    {user.is_online ? 'Online' : 'Offline'}
+                  <div className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${user.is_online ? 'bg-green-500/10 text-green-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'}`}>
+                    {user.is_online ? 'В сети' : 'Не в сети'}
                   </div>
                 </div>
               ))}
