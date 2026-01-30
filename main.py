@@ -106,14 +106,35 @@ async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
         user.last_seen = current_time
         await db.commit()
     
-    # Reload user with family
-    result = await db.execute(select(User).where(User.telegram_id == user_data.id).options(selectinload(User.family)))
+    # Reload user with family and family members
+    result = await db.execute(
+        select(User)
+        .where(User.telegram_id == user_data.id)
+        .options(selectinload(User.family).selectinload(Family.users))
+    )
     user = result.scalar_one()
     
+    # Serialize the response properly
     return {
         "status": "ok", 
-        "user": user, 
-        "family": user.family
+        "user": {
+            "telegram_id": user.telegram_id,
+            "username": user.username,
+            "photo_url": user.photo_url,
+            "family_id": user.family_id,
+        },
+        "family": {
+            "id": user.family.id,
+            "invite_code": user.family.invite_code,
+            "members": [
+                {
+                    "telegram_id": m.telegram_id,
+                    "username": m.username,
+                    "photo_url": m.photo_url
+                }
+                for m in user.family.users
+            ]
+        }
     }
 
 @app.get("/api/admin/stats")
@@ -179,7 +200,14 @@ async def join_family(join_req: JoinRequest, db: AsyncSession = Depends(get_db))
          "family": {
             "id": family.id,
             "invite_code": family.invite_code,
-            "members": members
+            "members": [
+                {
+                    "telegram_id": m.telegram_id,
+                    "username": m.username,
+                    "photo_url": m.photo_url
+                }
+                for m in members
+            ]
         }
     }
 
@@ -195,7 +223,16 @@ async def get_items(user_id: int, db: AsyncSession = Depends(get_db)):
     items_result = await db.execute(select(Item).where(Item.family_id == user.family_id))
     items = items_result.scalars().all()
     
-    return items
+    # Serialize items
+    return [
+        {
+            "id": item.id,
+            "text": item.text,
+            "is_bought": item.is_bought,
+            "category": item.category
+        }
+        for item in items
+    ]
 
 @app.post("/api/items")
 async def create_or_update_item(item_data: ItemCreate, db: AsyncSession = Depends(get_db)):
