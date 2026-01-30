@@ -77,7 +77,8 @@ class ItemCreate(BaseModel):
     text: str
     is_bought: bool
     category: str
-    user_id: int # To identify who is adding/modifying (and thus which family)
+    user_id: int
+    purchase_count: Optional[int] = 0
 
 class ItemUpdate(BaseModel):
     text: Optional[str] = None
@@ -101,6 +102,8 @@ async def startup():
             await conn.execute(text("ALTER TABLE families ADD COLUMN IF NOT EXISTS owner_id BIGINT;"))
             # Add visit_count column if not exists
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS visit_count INTEGER DEFAULT 0;"))
+            # Add purchase_count column to items if not exists
+            await conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS purchase_count INTEGER DEFAULT 0;"))
             await conn.commit()
     except Exception as e:
         # Ignore error if columns exist or other non-critical migration issue
@@ -388,7 +391,8 @@ async def get_items(user_id: int, db: AsyncSession = Depends(get_db)):
             "id": item.id,
             "text": item.text,
             "is_bought": item.is_bought,
-            "category": item.category
+            "category": item.category,
+            "purchase_count": item.purchase_count or 0
         }
         for item in items
     ]
@@ -411,6 +415,7 @@ async def create_or_update_item(item_data: ItemCreate, db: AsyncSession = Depend
         existing_item.text = item_data.text
         existing_item.is_bought = item_data.is_bought
         existing_item.category = item_data.category
+        existing_item.purchase_count = item_data.purchase_count or existing_item.purchase_count
         action = "item_updated"
     else:
         # Create
@@ -419,7 +424,8 @@ async def create_or_update_item(item_data: ItemCreate, db: AsyncSession = Depend
             text=item_data.text,
             is_bought=item_data.is_bought,
             category=item_data.category,
-            family_id=user.family_id
+            family_id=user.family_id,
+            purchase_count=item_data.purchase_count or 0
         )
         db.add(new_item)
         action = "item_added"

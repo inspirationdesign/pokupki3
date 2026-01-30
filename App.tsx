@@ -115,10 +115,8 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('lumina_categories');
     return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
   });
-  const [items, setItems] = useState<ProductItem[]>(() => {
-    const saved = localStorage.getItem('lumina_items');
-    return saved ? JSON.parse(saved) : INITIAL_ITEMS;
-  });
+  // Items are now loaded from server only - server is single source of truth
+  const [items, setItems] = useState<ProductItem[]>([]);
   const [sets, setSets] = useState<ShoppingSet[]>(() => {
     const saved = localStorage.getItem('lumina_sets');
     return saved ? JSON.parse(saved) : [];
@@ -317,24 +315,16 @@ const App: React.FC = () => {
         const itemsRes = await fetch(`/api/items?user_id=${tgUser.id}`);
         if (itemsRes.ok) {
           const remoteItems = await itemsRes.json();
-          // Merge strategies could be complex, for now we treat server as source of truth for simplicity as per requirements
-          // But we map them to our internal ProductItem structure
+          // Server is single source of truth - just map and set
           const mappedItems: ProductItem[] = remoteItems.map((ri: any) => ({
             id: ri.id,
             name: ri.text,
             categoryId: ri.category || 'dept_none',
             completed: ri.is_bought,
-            onList: true, // Assuming if it's in DB it's on list. Adjust logic if needed.
-            purchaseCount: 0 // We might lose local purchase count if strictly syncing. 
+            onList: true,
+            purchaseCount: ri.purchase_count || 0
           }));
-          // Try to preserve local purchase counts if names match
-          setItems(prev => {
-            const existingMap = new Map(prev.map(i => [i.id, i]));
-            return mappedItems.map(mi => ({
-              ...mi,
-              purchaseCount: existingMap.get(mi.id)?.purchaseCount || 0
-            }));
-          });
+          setItems(mappedItems);
         }
 
       } catch (e) {
@@ -423,7 +413,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem('lumina_categories', JSON.stringify(categories));
-    localStorage.setItem('lumina_items', JSON.stringify(items));
+    // Items are NOT saved to localStorage - server is single source of truth
     localStorage.setItem('lumina_sets', JSON.stringify(sets));
     localStorage.setItem('lumina_logs', JSON.stringify(logs));
     localStorage.setItem('lumina_dark', darkMode.toString());
@@ -644,7 +634,9 @@ const App: React.FC = () => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
         const newCompleted = !item.completed;
-        // Sync to backend
+        const newPurchaseCount = newCompleted ? item.purchaseCount + 1 : item.purchaseCount;
+
+        // Sync to backend with purchase_count
         if (tgUser) {
           fetch('/api/items', {
             method: 'POST',
@@ -654,7 +646,8 @@ const App: React.FC = () => {
               text: item.name,
               is_bought: newCompleted,
               category: item.categoryId,
-              user_id: tgUser.id
+              user_id: tgUser.id,
+              purchase_count: newPurchaseCount
             })
           }).catch(console.error);
         }

@@ -36,5 +36,6 @@ class Item(Base):
     is_bought = Column(Boolean, default=False)
     category = Column(String, default="dept_none")
     family_id = Column(Integer, ForeignKey("families.id"))
+    purchase_count = Column(Integer, default=0)
 
     family = relationship("Family", back_populates="items")
