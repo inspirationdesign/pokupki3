@@ -423,10 +423,13 @@ const App: React.FC = () => {
         const res = await fetch(`/api/items?user_id=${tgUser.id}`);
         if (res.ok && syncLockRef.current === 0) {
           const remoteItems = await res.json();
-          // Merge with previous items to preserve completedAt
+          // Merge: keep local-only items + update server items
           setItems(prev => {
             const prevMap = new Map(prev.map(p => [p.id, p]));
-            return remoteItems.map((ri: any) => {
+            const serverIds = new Set(remoteItems.map((ri: any) => ri.id));
+
+            // Map server items, preserving local completedAt
+            const serverMapped = remoteItems.map((ri: any) => {
               const existing = prevMap.get(ri.id);
               return {
                 id: ri.id,
@@ -435,10 +438,14 @@ const App: React.FC = () => {
                 completed: ri.is_bought,
                 onList: true,
                 purchaseCount: ri.purchase_count || 0,
-                // Preserve completedAt from local state
                 completedAt: existing?.completedAt
               };
             });
+
+            // Keep local-only items (not on server)
+            const localOnly = prev.filter(p => !p.onList && !serverIds.has(p.id));
+
+            return [...serverMapped, ...localOnly];
           });
         }
       } catch (e) {
@@ -574,8 +581,9 @@ const App: React.FC = () => {
       };
       setItems(prev => [newItem, ...prev]);
 
-      // Sync to backend with lock
-      if (tgUser) {
+      // Only sync to backend if item is on buy list (onList=true)
+      // History-only items (onList=false) stay local
+      if (tgUser && onList) {
         syncLockRef.current++;
         fetch('/api/items', {
           method: 'POST',
@@ -852,9 +860,14 @@ const App: React.FC = () => {
     setLastDeletedItem(item);
     setItems(prev => prev.filter(i => i.id !== item.id));
 
-    // Sync to backend
+    // Sync to backend with extended lock (2s delay after response to ensure server processed)
     if (tgUser) {
-      fetch(`/api/items/${item.id}?user_id=${tgUser.id}`, { method: 'DELETE' }).catch(console.error);
+      syncLockRef.current++;
+      fetch(`/api/items/${item.id}?user_id=${tgUser.id}`, { method: 'DELETE' })
+        .finally(() => {
+          // Keep lock for 2 more seconds to prevent polling from restoring deleted item
+          setTimeout(() => { syncLockRef.current--; }, 2000);
+        });
     }
 
     setItemDeleteConfirmModal({ isOpen: false, item: null });
@@ -2200,7 +2213,26 @@ const App: React.FC = () => {
               <button onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 font-black uppercase text-[11px] tracking-widest text-slate-400 hover:text-slate-600 transition-colors">Отмена</button>
               <button
                 onClick={() => {
-                  setItems(prev => prev.map(i => i.id === editingItem.id ? { ...i, name: editItemName, categoryId: editItemCategoryId } : i));
+                  const updatedItem = { ...editingItem, name: editItemName, categoryId: editItemCategoryId };
+                  setItems(prev => prev.map(i => i.id === editingItem.id ? updatedItem : i));
+
+                  // Sync to server
+                  if (tgUser) {
+                    syncLockRef.current++;
+                    fetch('/api/items', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        id: editingItem.id,
+                        text: editItemName,
+                        is_bought: editingItem.completed,
+                        category: editItemCategoryId,
+                        user_id: tgUser.id,
+                        purchase_count: editingItem.purchaseCount
+                      })
+                    }).finally(() => { syncLockRef.current--; });
+                  }
+
                   setIsEditModalOpen(false);
                 }}
                 className="flex-1 h-16 bg-primary text-white font-black uppercase text-[12px] tracking-widest rounded-[24px] shadow-2xl shadow-primary/30 hover:opacity-95 active:scale-95 transition-all"
