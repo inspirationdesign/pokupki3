@@ -1,7 +1,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CategoryDef, SmartCategoryResponse, PurchaseLog } from "../types";
 
-const MODEL_NAME = 'gemini-3-flash-preview';
+// Models to try in order (fallback if one fails with 400)
+const MODELS = ['gemini-3-flash-preview', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+let currentModelIndex = 0;
+const getModelName = () => MODELS[currentModelIndex] || MODELS[0];
 
 // Robust way to get the API key in different environments (Vite vs Node/Standard)
 const getApiKey = (): string => {
@@ -25,21 +28,35 @@ async function callWithRetry<T>(fn: () => Promise<T>, retries = 5, delay = 2000)
     return await fn();
   } catch (error: any) {
     console.error("[Lumina Service] AI Error Details:", error);
-    
-    const isRetryable = 
-      error?.status === 429 || 
+
+    // Check if it's a 400 error (bad request - often means model not available)
+    const is400Error =
+      error?.status === 400 ||
+      error?.code === 400 ||
+      error?.message?.includes('400') ||
+      (error?.error && error.error.code === 400);
+
+    // If 400 error and we have more models to try, switch to next model
+    if (is400Error && currentModelIndex < MODELS.length - 1) {
+      currentModelIndex++;
+      console.log(`[Lumina Service] Model error, switching to: ${getModelName()}`);
+      return callWithRetry(fn, retries, delay);
+    }
+
+    const isRetryable =
+      error?.status === 429 ||
       error?.code === 429 ||
       error?.status === 503 ||
       error?.code === 503 ||
-      error?.message?.includes('429') || 
+      error?.message?.includes('429') ||
       error?.message?.includes('503') ||
       error?.message?.includes('quota') ||
       error?.message?.includes('RESOURCE_EXHAUSTED') ||
       error?.message?.includes('Overloaded') ||
       (error?.error && (
-        error.error.code === 429 || 
-        error.error.code === 503 || 
-        error.error.status === 'RESOURCE_EXHAUSTED' || 
+        error.error.code === 429 ||
+        error.error.code === 503 ||
+        error.error.status === 'RESOURCE_EXHAUSTED' ||
         error.error.status === 'UNAVAILABLE'
       ));
 
@@ -63,9 +80,9 @@ export const categorizeProduct = async (productName: string, availableCategories
 
   return callWithRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
-    
+
     const response = await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: getModelName(),
       contents: `Category for: "${productName}". 
       Existing: ${categoryNames.join(', ')}. 
       If none fit, make new.`,
@@ -98,7 +115,7 @@ export const generateSetItems = async (setName: string, availableCategories: Cat
   return callWithRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const response = await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: getModelName(),
       contents: `Create a shopping list of INGREDIENTS or COMPONENTS for the set named: "${setName}".
       
       RULES:
@@ -106,7 +123,7 @@ export const generateSetItems = async (setName: string, availableCategories: Cat
       2. IF user input is a generic task (e.g. "Cleaning", "Party") -> RETURN ITEMS needed.
       3. Capitalize first letter of every item.
       4. Use categories from: ${categoryNames.join(', ')}.`,
-      config: { 
+      config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -144,7 +161,7 @@ export const parseDictatedText = async (text: string, availableCategories: Categ
   return callWithRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const response = await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: getModelName(),
       contents: `Parse shopping items from text: "${text}".
       
       STRICT RULES:
@@ -158,7 +175,7 @@ export const parseDictatedText = async (text: string, availableCategories: Categ
          - "Ingredients for pizza", "Pizza kit", "Everything for soup" -> List ingredients (DishName: "Pizza").
       
       Categories: ${categoryNames.join(', ')}.`,
-      config: { 
+      config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -192,7 +209,7 @@ export const analyzeHistoryForSets = async (logs: PurchaseLog[], availableCatego
     throw new Error("API ключ не найден.");
   }
   const categoryNames = availableCategories.map(c => c.name);
-  
+
   const historySummary = logs.map(l => ({
     date: new Date(l.date).toDateString(),
     items: l.items.map(i => i.name)
@@ -201,12 +218,12 @@ export const analyzeHistoryForSets = async (logs: PurchaseLog[], availableCatego
   return callWithRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const response = await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: getModelName(),
       contents: `Analyze history and suggest 3 logical shopping sets.
       History: ${JSON.stringify(historySummary)}.
       Categories: ${categoryNames.join(', ')}.
       Rule: Capitalize all item names.`,
-      config: { 
+      config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
