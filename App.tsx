@@ -892,10 +892,12 @@ const App: React.FC = () => {
   const inviteUser = () => {
     if (inviteCode) {
       const botUsername = "pokupkigross_bot";
-      // FIX: Use /start?startapp= format so it works everywhere
       const link = `https://t.me/${botUsername}/start?startapp=invite_${inviteCode}`;
-      if ((window as any).Telegram?.WebApp) {
-        (window as any).Telegram.WebApp.openTelegramLink(link);
+      const tg = (window as any).Telegram?.WebApp;
+
+      if (tg) {
+        // Use native share URL which opens Telegram's share dialog
+        tg.shareUrl?.(link) || tg.openTelegramLink?.(link) || window.open(link, '_blank');
       } else {
         window.open(link, '_blank');
       }
