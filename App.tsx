@@ -282,6 +282,11 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(tgUser)
         });
+        if (!authRes.ok) {
+          const errText = await authRes.text();
+          console.error("Auth Error:", errText);
+          throw new Error(`Server error: ${authRes.status}`);
+        }
         const authData = await authRes.json();
 
         // Check for invite code in start param
