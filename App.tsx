@@ -210,6 +210,9 @@ const App: React.FC = () => {
   const undoTimerRef = useRef<any>(null);
   const completedUndoTimerRef = useRef<any>(null);
 
+  // Sync lock - prevents polling from overwriting during active operations
+  const syncLockRef = useRef<number>(0);
+
   // States for Editing/Adding
   const [editingItem, setEditingItem] = useState<ProductItem | null>(null);
   const [editItemName, setEditItemName] = useState('');
@@ -413,9 +416,12 @@ const App: React.FC = () => {
     if (!tgUser || tgUser.id === 0) return;
 
     const pollItems = async () => {
+      // Skip if sync is in progress
+      if (syncLockRef.current > 0) return;
+
       try {
         const res = await fetch(`/api/items?user_id=${tgUser.id}`);
-        if (res.ok) {
+        if (res.ok && syncLockRef.current === 0) {
           const remoteItems = await res.json();
           const mappedItems: ProductItem[] = remoteItems.map((ri: any) => ({
             id: ri.id,
@@ -532,6 +538,23 @@ const App: React.FC = () => {
         completedAt: onList ? undefined : i.completedAt,
         categoryId: categoryId !== 'dept_none' ? categoryId : i.categoryId
       } : i));
+
+      // Sync existing item update to backend
+      if (tgUser) {
+        syncLockRef.current++;
+        fetch('/api/items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: existing.id,
+            text: existing.name,
+            is_bought: onList ? false : existing.completed,
+            category: categoryId !== 'dept_none' ? categoryId : existing.categoryId,
+            user_id: tgUser.id,
+            purchase_count: existing.purchaseCount
+          })
+        }).finally(() => { syncLockRef.current--; });
+      }
     } else {
       const newItem: ProductItem = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
@@ -543,8 +566,9 @@ const App: React.FC = () => {
       };
       setItems(prev => [newItem, ...prev]);
 
-      // Sync to backend
+      // Sync to backend with lock
       if (tgUser) {
+        syncLockRef.current++;
         fetch('/api/items', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -553,9 +577,10 @@ const App: React.FC = () => {
             text: newItem.name,
             is_bought: newItem.completed,
             category: newItem.categoryId,
-            user_id: tgUser.id
+            user_id: tgUser.id,
+            purchase_count: 0
           })
-        }).catch(console.error);
+        }).finally(() => { syncLockRef.current--; });
       }
     }
   };
@@ -660,8 +685,9 @@ const App: React.FC = () => {
         const newCompleted = !item.completed;
         const newPurchaseCount = newCompleted ? item.purchaseCount + 1 : item.purchaseCount;
 
-        // Sync to backend with purchase_count
+        // Sync to backend with purchase_count and sync lock
         if (tgUser) {
+          syncLockRef.current++;
           fetch('/api/items', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -673,7 +699,7 @@ const App: React.FC = () => {
               user_id: tgUser.id,
               purchase_count: newPurchaseCount
             })
-          }).catch(console.error);
+          }).finally(() => { syncLockRef.current--; });
         }
 
         const now = Date.now();
