@@ -546,16 +546,17 @@ const App: React.FC = () => {
     const existing = items.find(i => i.name.toLowerCase() === capName.toLowerCase());
 
     if (existing) {
+      const updatedOnList = onList || existing.onList;
       setItems(prev => prev.map(i => i.id === existing.id ? {
         ...i,
-        onList: onList || i.onList,
+        onList: updatedOnList,
         completed: onList ? false : i.completed,
         completedAt: onList ? undefined : i.completedAt,
         categoryId: categoryId !== 'dept_none' ? categoryId : i.categoryId
       } : i));
 
-      // Sync existing item update to backend
-      if (tgUser) {
+      // Only sync to server if item is now on buy list
+      if (tgUser && updatedOnList) {
         syncLockRef.current++;
         fetch('/api/items', {
           method: 'POST',
@@ -682,12 +683,9 @@ const App: React.FC = () => {
   const handleBulkAdd = () => {
     if (!bulkAddText.trim() || !bulkAddCategory) return;
     const lines = bulkAddText.split('\n').map(l => l.trim()).filter(l => l);
-    lines.forEach(name => finalizeAddItem(name, bulkAddCategory, viewMode === 'buy')); // onList is true if we are in buy mode, otherwise standard behavior (could be just to history)
-
-    // Actually, finalizeAddItem third arg 'onList' defaults to true.
-    // If we are in History view, adding an item usually means adding to database AND potentially to list?
-    // The previous logic for single item add in history was `finalizeAddItem(..., ..., true)`.
-    // So default behavior is correct.
+    // onList = false when in history view (items go to history only, not buy list)
+    const shouldAddToList = viewMode === 'buy';
+    lines.forEach(name => finalizeAddItem(name, bulkAddCategory, shouldAddToList));
 
     setIsBulkAddModalOpen(false);
     setBulkAddText('');
