@@ -99,6 +99,8 @@ async def startup():
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITHOUT TIME ZONE;"))
             # Add owner_id column if not exists
             await conn.execute(text("ALTER TABLE families ADD COLUMN IF NOT EXISTS owner_id BIGINT;"))
+            # Add visit_count column if not exists
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS visit_count INTEGER DEFAULT 0;"))
             await conn.commit()
     except Exception as e:
         # Ignore error if columns exist or other non-critical migration issue
@@ -123,7 +125,8 @@ async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
             username=user_data.username,
             photo_url=user_data.photo_url,
             family_id=new_family.id,
-            last_seen=current_time
+            last_seen=current_time,
+            visit_count=1
         )
         db.add(user)
         await db.commit()
@@ -133,6 +136,9 @@ async def auth_user(user_data: UserAuth, db: AsyncSession = Depends(get_db)):
             user.username = user_data.username
         if user.photo_url != user_data.photo_url:
             user.photo_url = user_data.photo_url
+        
+        # Increment visit count
+        user.visit_count = (user.visit_count or 0) + 1
         
         # Update last_seen
         user.last_seen = current_time
@@ -201,10 +207,11 @@ async def admin_stats(admin_user_id: int, db: AsyncSession = Depends(get_db)):
         stats.append({
             "id": u.telegram_id,
             "username": u.username,
-            "first_name": "Unknown", # We assume frontend passes names or we store them. Model only has username.
-            "last_seen": u.last_seen,
+            "photo_url": u.photo_url,
+            "last_seen": u.last_seen.isoformat() if u.last_seen else None,
             "is_online": is_online,
-            "family_id": u.family_id
+            "family_id": u.family_id,
+            "visit_count": u.visit_count or 0
         })
         
     return stats

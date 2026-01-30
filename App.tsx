@@ -418,6 +418,42 @@ const App: React.FC = () => {
     };
   }, [tgUser]);
 
+  // Polling fallback for real-time sync (every 10 seconds)
+  useEffect(() => {
+    if (!tgUser || tgUser.id === 0) return;
+
+    const pollItems = async () => {
+      try {
+        const res = await fetch(`/api/items?user_id=${tgUser.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setItems(prev => {
+            // Merge server items with local items
+            const serverIds = new Set(data.map((item: any) => item.id));
+            const updatedItems = data.map((item: any) => ({
+              id: item.id,
+              name: item.text,
+              categoryId: item.category || 'dept_none',
+              completed: item.is_bought,
+              onList: true,
+              purchaseCount: prev.find(p => p.id === item.id)?.purchaseCount || 0
+            }));
+            // Keep local-only items that haven't synced yet
+            const localOnlyItems = prev.filter(p => !serverIds.has(p.id) && !p.onList);
+            return [...updatedItems, ...localOnlyItems];
+          });
+        }
+      } catch (e) {
+        console.error('Polling error:', e);
+      }
+    };
+
+    // Poll every 10 seconds
+    const interval = setInterval(pollItems, 10000);
+
+    return () => clearInterval(interval);
+  }, [tgUser]);
+
   useEffect(() => {
     localStorage.setItem('lumina_categories', JSON.stringify(categories));
     localStorage.setItem('lumina_items', JSON.stringify(items));
@@ -2012,12 +2048,17 @@ const App: React.FC = () => {
                         </div>
                       )}
                     </div>
-                    <div>
-                      <p className="text-sm font-bold">{user.username || user.first_name || 'Неизвестный'}</p>
-                      <p className="text-[10px] opacity-40">Семья: {user.family_id}</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold truncate">{user.username || 'Неизвестный'}</p>
+                      <p className="text-[10px] opacity-40">Семья: {user.family_id} • Визитов: {user.visit_count || 0}</p>
+                      {user.last_seen && (
+                        <p className="text-[9px] opacity-30">
+                          Был(а): {new Date(user.last_seen).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <div className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${user.is_online ? 'bg-green-500/10 text-green-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'}`}>
+                  <div className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest flex-shrink-0 ${user.is_online ? 'bg-green-500/10 text-green-500' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'}`}>
                     {user.is_online ? 'В сети' : 'Не в сети'}
                   </div>
                 </div>

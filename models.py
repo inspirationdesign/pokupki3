@@ -24,6 +24,7 @@ class User(Base):
     photo_url = Column(String, nullable=True)
     family_id = Column(Integer, ForeignKey("families.id"))
     last_seen = Column(DateTime, nullable=True)
+    visit_count = Column(Integer, default=0)
 
     family = relationship("Family", back_populates="users")
 
