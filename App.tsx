@@ -408,9 +408,33 @@ const App: React.FC = () => {
     };
   }, [tgUser]);
 
-  // NOTE: Real-time sync is handled via WebSocket above
-  // Items are synced from server on initial load in authAndSync
+  // Polling for real-time sync (every 3 seconds)
+  useEffect(() => {
+    if (!tgUser || tgUser.id === 0) return;
 
+    const pollItems = async () => {
+      try {
+        const res = await fetch(`/api/items?user_id=${tgUser.id}`);
+        if (res.ok) {
+          const remoteItems = await res.json();
+          const mappedItems: ProductItem[] = remoteItems.map((ri: any) => ({
+            id: ri.id,
+            name: ri.text,
+            categoryId: ri.category || 'dept_none',
+            completed: ri.is_bought,
+            onList: true,
+            purchaseCount: ri.purchase_count || 0
+          }));
+          setItems(mappedItems);
+        }
+      } catch (e) {
+        // Silent fail for polling
+      }
+    };
+
+    const interval = setInterval(pollItems, 3000);
+    return () => clearInterval(interval);
+  }, [tgUser]);
   useEffect(() => {
     localStorage.setItem('lumina_categories', JSON.stringify(categories));
     // Items are NOT saved to localStorage - server is single source of truth
