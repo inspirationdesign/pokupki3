@@ -28,7 +28,14 @@ if DATABASE_URL:
     except Exception as e:
         print(f"DEBUG: Could not parse URL for debugging: {e}")
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+# Fix for Supabase/PgBouncer: Disable prepared statements
+engine = create_async_engine(
+    DATABASE_URL, 
+    echo=True,
+    connect_args={
+        "statement_cache_size": 0
+    }
+)
 
 AsyncSessionLocal = sessionmaker(
     bind=engine,
