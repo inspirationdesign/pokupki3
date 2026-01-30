@@ -824,15 +824,23 @@ const App: React.FC = () => {
         rec.stop();
         setIsRecording(false);
 
+        // Open modal immediately with loading state
+        setParsedItems([]);
+        setDetectedDishName(null);
+        setIsParsedModalOpen(true);
         setIsAiLoading(true);
+
         try {
           const result = await parseDictatedText(text, categories);
           if (result?.items.length) {
             setParsedItems(result.items.map((p: any) => ({ ...p, selected: true })));
             setDetectedDishName(result.dishName || null);
-            setIsParsedModalOpen(true);
+          } else {
+            setIsParsedModalOpen(false);
+            showToast("Не удалось распознать товары", true);
           }
         } catch (err) {
+          setIsParsedModalOpen(false);
           handleAiError(err);
         } finally {
           setIsAiLoading(false);
@@ -1679,6 +1687,37 @@ const App: React.FC = () => {
             )}
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-hide">
+              {/* Skeleton loading */}
+              {isAiLoading && parsedItems.length === 0 && (
+                <>
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl animate-pulse">
+                    <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                      <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl animate-pulse">
+                    <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-2/3" />
+                      <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/3" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl animate-pulse">
+                    <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-4/5" />
+                      <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-2/5" />
+                    </div>
+                  </div>
+                  <p className="text-center text-xs text-slate-400 mt-4 animate-pulse">
+                    {['Подключаем сверхразум...', 'Читаем мысли...', 'Запускаем нейросети...', 'Творим магию...', 'ИИ думает о продуктах...', 'Связываемся с космосом...', 'Анализируем голос...', 'Ловим каждое слово...'][Math.floor(Math.random() * 8)]}
+                  </p>
+                </>
+              )}
+
+              {/* Actual items */}
               {parsedItems.map((item, idx) => (
                 <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-transparent dark:border-slate-800">
                   <div
