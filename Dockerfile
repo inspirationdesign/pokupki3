@@ -1,6 +1,13 @@
 # Stage 1: Build React App
 FROM node:18-alpine as build
 WORKDIR /app
+
+# Accept build args for API key (supports both naming conventions)
+ARG VITE_GEMINI_API_KEY
+ARG GEMINI_API_KEY
+# Use VITE_GEMINI_API_KEY if provided, otherwise use GEMINI_API_KEY
+ENV VITE_GEMINI_API_KEY=${VITE_GEMINI_API_KEY:-$GEMINI_API_KEY}
+
 COPY package*.json ./
 RUN npm install
 COPY . .
